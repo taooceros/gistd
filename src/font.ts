@@ -1,5 +1,3 @@
-// @ts-ignore
-import type { LazyFont } from "typst.ts-0.14/dist/esm/options.init.mjs";
 import remoteFontInfo from "./fontInfo.json";
 import { cssToFontInformation } from "./font-css";
 import { googleFontsCssUrl } from "./font-spec";
@@ -35,13 +33,6 @@ interface FontCache<T = Uint8Array> {
   ttl: number;
 }
 
-interface FontToLoad {
-  conditionKey: string;
-  url: string;
-  dataFut: Promise<Uint8Array>;
-  ttl: number;
-}
-
 function fontCacheKey(font: {
   conditions: { t: string; v: string }[];
   url: string;
@@ -69,9 +60,9 @@ const refreshDate = () => {
  * Loads a font by a lazy font synchronously, which is required by the compiler.
  * @param font
  */
-export function loadFontSync(
-  font: LazyFont & { url: string }
-): (index: number) => Uint8Array {
+export function loadFontSync(font: {
+  url: string;
+}): (index: number) => Uint8Array {
   return () => {
     const xhr = new XMLHttpRequest();
     xhr.overrideMimeType("text/plain; charset=x-user-defined");
@@ -422,62 +413,36 @@ export async function getWithIDBFontProvider(
     fonts: [],
   };
 
-  // for all fonts that is requested, we refresh the ttl
-  // font rest fonts, if it exceeds ttl, we remove it
-  const loadedFontFuts: Promise<Uint8Array>[] = [];
-  const fontsToLoad: Record<string, FontToLoad> = {};
+  // Cached fonts are read from IndexedDB up front (local, fast). Uncached
+  // fonts are fetched only when the compiler first asks for them: the compiler
+  // calls `blob()` lazily and synchronously, so misses use a sync XHR and
+  // are then persisted for next time.
+  const cachedData: (Uint8Array | undefined)[] = [];
   for (const remoteFont of fontInfo) {
     const conditionKey = fontCacheKey(remoteFont);
     const obj = await promisifiedReq<FontCache>(
       fontCacheFull.get(conditionKey)
     );
-    const ttl = refreshDate();
     if (obj) {
-      obj.ttl = ttl;
-      fontCache.put(obj, conditionKey);
-      loadedFontFuts.push(Promise.resolve(obj.data));
-    } else {
-      const dataFut = fetch(remoteFont.url)
-        .then((res) => res.arrayBuffer())
-        .then((buffer) => new Uint8Array(buffer));
-      fontsToLoad[conditionKey] ||= {
-        conditionKey,
-        url: remoteFont.url,
-        dataFut,
-        ttl,
-      };
-      loadedFontFuts.push(dataFut);
+      obj.ttl = refreshDate();
+      fontCache.put(
+        { data: obj.data.length, url: obj.url, ttl: obj.ttl },
+        conditionKey
+      );
+      fontCacheFull.put(obj, conditionKey);
     }
+    cachedData.push(obj?.data);
   }
 
-  const loadedFonts = await Promise.all(loadedFontFuts);
-
-  const tx2 = idb.transaction(["fontCache", "fontCacheFull"], "readwrite");
-  fontCache = tx2.objectStore("fontCache");
-  fontCacheFull = tx2.objectStore("fontCacheFull");
-  for (const { conditionKey, url, dataFut, ttl } of Object.values(
-    fontsToLoad
-  )) {
-    const data = await dataFut;
+  const persist = (conditionKey: string, url: string, data: Uint8Array) => {
+    const ttl = refreshDate();
+    const tx2 = idb.transaction(["fontCache", "fontCacheFull"], "readwrite");
+    tx2.objectStore("fontCache").put({ data: data.length, url, ttl }, conditionKey);
+    tx2.objectStore("fontCacheFull").put({ data, url, ttl }, conditionKey);
     add.dataLen += data.length;
     add.fonts.push([url, conditionKey]);
-    fontCache.put(
-      {
-        data: data.length,
-        url,
-        ttl,
-      },
-      conditionKey
-    );
-    fontCacheFull.put(
-      {
-        data: data,
-        url,
-        ttl,
-      },
-      conditionKey
-    );
-  }
+  };
+
   // delete all local fonts that is exceed ttl
   (async () => {
     const tx3 = idb.transaction(["fontCache", "fontCacheFull"], "readwrite");
@@ -505,8 +470,18 @@ export async function getWithIDBFontProvider(
     };
   })();
 
-  return fontInfo.map((font, i) => ({
-    blob: () => loadedFonts[i],
-    ...font,
-  }));
+  return fontInfo.map((font, i) => {
+    let data = cachedData[i];
+    return {
+      ...font,
+      blob: () => {
+        if (!data) {
+          console.log("loading font on demand:", font.url);
+          data = loadFontSync(font)(0);
+          if (data.length > 0) persist(fontCacheKey(font), font.url, data);
+        }
+        return data;
+      },
+    };
+  });
 }
