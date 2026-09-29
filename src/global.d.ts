@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 interface Window {
   $typst: import("@myriaddreamin/typst.ts/contrib/snippet").TypstSnippet;
   $typst$script: any;

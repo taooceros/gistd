@@ -30,7 +30,8 @@ export type StorageSpec =
   | HttpStorageSpec;
 
 type CorsOption = string | boolean;
-const DEFAULT_CORS_PROXY = "/git-cors-proxy";
+const DEFAULT_CORS_PROXY =
+  import.meta.env.VITE_GISTD_CORS_PROXY || "/git-cors-proxy";
 
 export interface GitHubStorageSpec {
   type: "github";

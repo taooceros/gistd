@@ -47,7 +47,11 @@ export function argsFromUrl(): Args {
   _cacheKey = newKey;
   const [pathname, locationSearch, hostname] = newKey;
 
-  const inputPath = pathname.slice(1) || "";
+  /// Strips the deploy base (e.g. `/gistd/` on GitHub project pages).
+  const base = import.meta.env.BASE_URL || "/";
+  const inputPath = pathname.startsWith(base)
+    ? pathname.slice(base.length)
+    : pathname.slice(1);
   const search = new URLSearchParams(locationSearch || "");
   const readme = /(?:-|.)cn/g.test(hostname) ? README_CN : README;
 
