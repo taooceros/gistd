@@ -414,9 +414,10 @@ export async function getWithIDBFontProvider(
   };
 
   // Cached fonts are read from IndexedDB up front (local, fast). Uncached
-  // fonts are fetched only when the compiler first asks for them: the compiler
-  // calls `blob()` lazily and synchronously, so misses use a sync XHR and
-  // are then persisted for next time.
+  // fonts that are likely needed (core defaults + fonts documents used before)
+  // are prefetched in parallel; the rest are fetched only when the compiler
+  // first asks for them: it calls `blob()` lazily and synchronously, so those
+  // misses use a sync XHR. Everything fetched is persisted for next time.
   const cachedData: (Uint8Array | undefined)[] = [];
   for (const remoteFont of fontInfo) {
     const conditionKey = fontCacheKey(remoteFont);
@@ -442,6 +443,25 @@ export async function getWithIDBFontProvider(
     add.dataLen += data.length;
     add.fonts.push([url, conditionKey]);
   };
+
+  const usedFonts = readUsedFonts();
+  await Promise.all(
+    fontInfo.map(async (font, i) => {
+      const likelyNeeded =
+        usedFonts.has(font.url) ||
+        CORE_FONTS.some((name) => font.url.endsWith(`/${name}`));
+      if (cachedData[i] || !likelyNeeded) return;
+      try {
+        const res = await fetch(font.url);
+        if (!res.ok) return;
+        const data = new Uint8Array(await res.arrayBuffer());
+        cachedData[i] = data;
+        persist(fontCacheKey(font), font.url, data);
+      } catch (e) {
+        console.warn("font prefetch failed, will load on demand", font.url, e);
+      }
+    })
+  );
 
   // delete all local fonts that is exceed ttl
   (async () => {
@@ -475,6 +495,10 @@ export async function getWithIDBFontProvider(
     return {
       ...font,
       blob: () => {
+        if (!usedFonts.has(font.url)) {
+          usedFonts.add(font.url);
+          localStorage.setItem(USED_FONTS_KEY, JSON.stringify([...usedFonts]));
+        }
         if (!data) {
           console.log("loading font on demand:", font.url);
           data = loadFontSync(font)(0);
@@ -484,4 +508,27 @@ export async function getWithIDBFontProvider(
       },
     };
   });
+}
+
+/// Fonts nearly every document needs (Typst defaults for text, math, raw).
+const CORE_FONTS = [
+  "LibertinusSerif-Regular.otf",
+  "LibertinusSerif-Bold.otf",
+  "LibertinusSerif-Italic.otf",
+  "NewCMMath-Book.otf",
+  "DejaVuSansMono.ttf",
+];
+
+/// URLs of fonts the compiler has requested before on this device.
+const USED_FONTS_KEY = "gistd-font-used";
+
+function readUsedFonts(): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(USED_FONTS_KEY) || "[]");
+    return new Set(
+      Array.isArray(parsed) ? parsed.filter((u) => typeof u === "string") : []
+    );
+  } catch {
+    return new Set();
+  }
 }
