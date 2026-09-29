@@ -102,7 +102,7 @@ export interface DirectoryViewState {
   compilerLoaded: State<boolean>;
   changeFocusFile: State<FsItemState | undefined>;
   focusFile: State<FsItemState | undefined>;
-  reloadBell: State<boolean>;
+  reloadBell: State<number>;
   error: State<string>;
 }
 
@@ -151,7 +151,8 @@ export const DirectoryView = async ({
         remoteFsLoaded,
         fsState,
         error,
-        intoCompiler
+        intoCompiler,
+        refreshFromRemote
       ).load();
       break;
     }
@@ -197,8 +198,34 @@ export const DirectoryView = async ({
 
       reloadAll(fsState.val);
       console.log("read fs done");
-      reloadBell.val = true;
+      reloadBell.val++;
     });
+  }
+
+  /// Applies files fetched in background after the cached copy was compiled.
+  async function refreshFromRemote(files: Map<string, Uint8Array>) {
+    if (!loaded.val) {
+      // Initial load has not run yet; it will read the fresh files itself.
+      return;
+    }
+    console.log("remote changed, reloading fs");
+    let state = fsState.val!;
+    for (const [path, data] of files) {
+      const prev = state.pathSet.get(path);
+      if (prev) prev.deleted.val = false;
+      state = state.add(path, data);
+    }
+    fsState.val = state;
+    await reloadAll(state);
+
+    const $typst = window.$typst;
+    for (const item of state.fsList) {
+      if (!files.has(item.path) && !item.deleted.val) {
+        item.deleted.val = true;
+        await $typst.unmapShadow?.(item.path);
+      }
+    }
+    reloadBell.val++;
   }
 };
 
@@ -212,30 +239,41 @@ class GitLoader {
     public remoteFsLoaded: State<boolean>,
     public fsState: State<FsState | undefined>,
     public error: State<string>,
-    public intoCompiler: (loader: () => Promise<void>) => any
+    public intoCompiler: (loader: () => Promise<void>) => any,
+    public onRemoteUpdated: (files: Map<string, Uint8Array>) => Promise<void>
   ) {
     this.cacheKey = `gistd-git-${this.storage.remoteUrl()}$$[${
       this.storage.spec.ref
     }]`;
     this.fs = this.createFs(false);
     this.intoCompiler(async () => {
-      const addPath = async (path: string) => {
-        // read type
-        const type = await this.fs.promises.stat(path);
-        if (type.isDirectory()) {
-          for (const fileName of await this.fs.promises.readdir(path)) {
-            await addPath(
-              path === "/" ? "/" + fileName : dirJoin(path, fileName)
-            );
-          }
-        } else {
-          const data = await this.fs.promises.readFile(path);
-          this.fsState.val = this.fsState.val!.add(path, data);
-        }
-      };
-
-      await addPath(this.projectDir);
+      for (const [path, data] of await this.readAllFiles()) {
+        this.fsState.val = this.fsState.val!.add(path, data);
+      }
     });
+  }
+
+  private async readAllFiles() {
+    const files = new Map<string, Uint8Array>();
+    const addPath = async (path: string) => {
+      const type = await this.fs.promises.stat(path);
+      if (type.isDirectory()) {
+        for (const fileName of await this.fs.promises.readdir(path)) {
+          if (path === "/" && fileName === ".git") continue;
+          await addPath(path === "/" ? "/" + fileName : dirJoin(path, fileName));
+        }
+      } else {
+        files.set(path, await this.fs.promises.readFile(path));
+      }
+    };
+    await addPath(this.projectDir);
+    return files;
+  }
+
+  private headOid() {
+    return git
+      .resolveRef({ fs: this.fs, dir: "/", ref: "HEAD" })
+      .catch(() => undefined);
   }
 
   private createFs(wipe: boolean) {
@@ -272,45 +310,54 @@ class GitLoader {
         ttl: number;
         loaded: boolean;
       }>(meta.get(this.cacheKey));
-      this.remoteFsLoaded.val = oldMeta?.loaded;
+      /// Cache hit: compile the local copy right away, refresh in background.
+      const cached = oldMeta?.loaded === true;
+      this.remoteFsLoaded.val = cached;
       await promisifiedReq(
         meta.put(
-          {
-            db: this.cacheKey,
-            ttl: refreshDate(),
-            loaded: this.remoteFsLoaded.val,
-          },
+          { db: this.cacheKey, ttl: refreshDate(), loaded: cached },
           this.cacheKey
         )
       );
       tx.commit();
 
-      /// Loads from git
+      const markLoaded = async () => {
+        const tx2 = idb.transaction([`igit-meta`], "readwrite");
+        await promisifiedReq(
+          tx2
+            .objectStore(`igit-meta`)
+            .put(
+              { db: this.cacheKey, ttl: refreshDate(), loaded: true },
+              this.cacheKey
+            )
+        );
+      };
+
+      /// Loads from git (in background if cached)
+      const headBefore = cached ? await this.headOid() : undefined;
       this.tryLoadFromGit()
-        .then(() => {
+        .then(async () => {
           this.error.val = "";
-          return (this.remoteFsLoaded.val = true);
+          await markLoaded();
+          if (!cached) {
+            this.remoteFsLoaded.val = true;
+            return;
+          }
+          const headAfter = await this.headOid();
+          console.log("git refresh:", headBefore, "->", headAfter);
+          if (headAfter !== headBefore) {
+            await this.onRemoteUpdated(await this.readAllFiles());
+          }
         })
         .catch((e) => {
           console.error(e);
+          if (cached) {
+            console.warn("git refresh failed, keeping cached copy");
+            return;
+          }
           this.error.val = `Failed to load git repository: ${e}`;
-          return (this.remoteFsLoaded.val = false);
+          this.remoteFsLoaded.val = false;
         });
-
-      /// Updates metadata
-      const tx2 = idb.transaction([`igit-meta`], "readwrite");
-      meta = tx2.objectStore(`igit-meta`);
-      await promisifiedReq(
-        meta.put(
-          {
-            db: this.cacheKey,
-            ttl: refreshDate(),
-            loaded: this.remoteFsLoaded.val,
-          },
-          this.cacheKey
-        )
-      );
-      tx2.commit();
 
       /// Updates cache
       gc();
