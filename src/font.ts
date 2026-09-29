@@ -425,12 +425,11 @@ export async function getWithIDBFontProvider(
       fontCacheFull.get(conditionKey)
     );
     if (obj) {
-      obj.ttl = refreshDate();
+      // Refresh the ttl on the small metadata record; gc only reads that one.
       fontCache.put(
-        { data: obj.data.length, url: obj.url, ttl: obj.ttl },
+        { data: obj.data.length, url: obj.url, ttl: refreshDate() },
         conditionKey
       );
-      fontCacheFull.put(obj, conditionKey);
     }
     cachedData.push(obj?.data);
   }
@@ -438,7 +437,9 @@ export async function getWithIDBFontProvider(
   const persist = (conditionKey: string, url: string, data: Uint8Array) => {
     const ttl = refreshDate();
     const tx2 = idb.transaction(["fontCache", "fontCacheFull"], "readwrite");
-    tx2.objectStore("fontCache").put({ data: data.length, url, ttl }, conditionKey);
+    tx2
+      .objectStore("fontCache")
+      .put({ data: data.length, url, ttl }, conditionKey);
     tx2.objectStore("fontCacheFull").put({ data, url, ttl }, conditionKey);
     add.dataLen += data.length;
     add.fonts.push([url, conditionKey]);
@@ -524,7 +525,9 @@ const USED_FONTS_KEY = "gistd-font-used";
 
 function readUsedFonts(): Set<string> {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(USED_FONTS_KEY) || "[]");
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem(USED_FONTS_KEY) || "[]"
+    );
     return new Set(
       Array.isArray(parsed) ? parsed.filter((u) => typeof u === "string") : []
     );

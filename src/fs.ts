@@ -11,7 +11,9 @@ import {
   GitHubStorageSpecExt,
   ForgejoStorageSpecExt,
   StorageSpecExt,
+  refSegmentCount,
 } from "./storage";
+import { Diagnostic, missingFilePaths } from "./missing-files";
 
 // @ts-ignore
 import gitModule from "https://cdn.jsdelivr.net/npm/isomorphic-git@1.24.5/+esm";
@@ -114,51 +116,6 @@ export interface FsHooks {
   materializeMissing?: (diagnostics: Diagnostic[]) => Promise<boolean>;
 }
 
-interface Diagnostic {
-  path: string;
-  range: string;
-  message: string;
-}
-
-/// Absolute paths of files a compile failed to load. Typst reports either
-/// `file not found (searched at /x.typ)` or, for paths the shadow fs doesn't
-/// have, `failed to load file (access denied)` pointing at the path literal
-/// (range `line:col-line:col`, 0-based) in the source.
-export function missingFilePaths(
-  diagnostics: Diagnostic[],
-  readSource: (path: string) => Uint8Array | undefined
-) {
-  const paths: string[] = [];
-  for (const { path, range, message } of diagnostics) {
-    const searched = /file not found \(searched at ([^)]+)\)/.exec(message);
-    if (searched) {
-      paths.push(normalizePath("/", searched[1]));
-      continue;
-    }
-    if (!/failed to load file|file not found/.test(message)) continue;
-    const source = readSource(path);
-    const span = /^(\d+):(\d+)-(\d+):(\d+)$/.exec(range);
-    if (!source || !span) continue;
-    const lines = new TextDecoder().decode(source).split("\n");
-    const [startLine, startCol, endLine, endCol] = span.slice(1).map(Number);
-    if (startLine !== endLine) continue;
-    const literal = lines[startLine]?.slice(startCol, endCol);
-    const target = literal && /^"([^"]+)"$/.exec(literal.trim())?.[1];
-    if (target) paths.push(normalizePath(path.slice(0, path.lastIndexOf("/") + 1), target));
-  }
-  return paths;
-}
-
-/// Resolves `target` against directory `dir` (both project-absolute).
-function normalizePath(dir: string, target: string) {
-  const parts: string[] = [];
-  for (const seg of (target.startsWith("/") ? target : dir + target).split("/")) {
-    if (seg === "..") parts.pop();
-    else if (seg && seg !== ".") parts.push(seg);
-  }
-  return "/" + parts.join("/");
-}
-
 // todo: cleanup code
 /// The directory component
 export const DirectoryView = async ({
@@ -215,15 +172,9 @@ export const DirectoryView = async ({
           diagnostics,
           (p) => fsState.val?.pathSet.get(p)?.data.val
         );
-        if (paths.length === 0) return false;
         const files = await loader.materialize(paths);
         if (files.size === 0) return false;
-        let state = fsState.val!;
-        for (const [path, data] of files) {
-          state = state.add(path, data);
-          await window.$typst.mapShadow(path, data);
-        }
-        fsState.val = state;
+        await reloadAll(addFiles(files));
         return true;
       };
       break;
@@ -274,36 +225,47 @@ export const DirectoryView = async ({
     });
   }
 
-  /// Applies files fetched in background after the cached copy was compiled.
-  async function refreshFromRemote(files: Map<string, Uint8Array>) {
-    if (!loaded.val) {
-      // Initial load has not run yet; it will read the fresh files itself.
-      return;
-    }
-    console.log("remote changed, reloading fs");
+  /// Adds or updates files in the file list (un-deleting re-added paths).
+  function addFiles(files: Map<string, Uint8Array>) {
     let state = fsState.val!;
     for (const [path, data] of files) {
       const prev = state.pathSet.get(path);
       if (prev) prev.deleted.val = false;
       state = state.add(path, data);
     }
-    fsState.val = state;
-    await reloadAll(state);
+    return (fsState.val = state);
+  }
 
-    const $typst = window.$typst;
+  /// Applies files fetched in background after the cached copy was compiled.
+  async function refreshFromRemote(files: Map<string, Uint8Array>) {
+    // Before the initial load, the loader reads the fresh files itself.
+    if (!loaded.val) return;
+    const state = addFiles(files);
+    await reloadAll(state);
     for (const item of state.fsList) {
       if (!files.has(item.path) && !item.deleted.val) {
         item.deleted.val = true;
-        await $typst.unmapShadow?.(item.path);
+        await window.$typst.unmapShadow?.(item.path);
       }
     }
     reloadBell.val++;
   }
 };
 
+/// Record in the `gistd-git-meta` IndexedDB, one per cached repository ref.
+interface GitCacheMeta {
+  db: string;
+  ttl: number;
+  loaded: boolean;
+  /// Repo-relative paths written out by the sparse checkout;
+  /// absent for caches holding the whole tree.
+  checkoutPaths?: string[];
+}
+
 class GitLoader {
   private cacheKey!: string;
   private fs!: LightningFS;
+  private idb!: IDBDatabase;
   /// Repo-relative paths written out to the fs; undefined = whole tree.
   private checkoutPaths?: string[];
   private headFiles?: Promise<Set<string>>;
@@ -334,7 +296,9 @@ class GitLoader {
       if (type.isDirectory()) {
         for (const fileName of await this.fs.promises.readdir(path)) {
           if (path === "/" && fileName === ".git") continue;
-          await addPath(path === "/" ? "/" + fileName : dirJoin(path, fileName));
+          await addPath(
+            path === "/" ? "/" + fileName : dirJoin(path, fileName)
+          );
         }
       } else {
         files.set(path, await this.fs.promises.readFile(path));
@@ -348,18 +312,6 @@ class GitLoader {
     const run = this.gitQueue.then(op, op);
     this.gitQueue = run.catch(() => {});
     return run;
-  }
-
-  private get pathsKey() {
-    return `gistd-git-paths:${this.cacheKey}`;
-  }
-
-  private saveCheckoutPaths() {
-    if (this.checkoutPaths) {
-      localStorage.setItem(this.pathsKey, JSON.stringify(this.checkoutPaths));
-    } else {
-      localStorage.removeItem(this.pathsKey);
-    }
   }
 
   /// Writes out the folders of `missing` absolute paths that exist at HEAD
@@ -396,7 +348,7 @@ class GitLoader {
       })
     );
     checkoutPaths.push(...filepaths);
-    this.saveCheckoutPaths();
+    await this.putMeta(true);
 
     const files = new Map<string, Uint8Array>();
     for (const p of filepaths) {
@@ -411,6 +363,17 @@ class GitLoader {
     return git
       .resolveRef({ fs: this.fs, dir: "/", ref: "HEAD" })
       .catch(() => undefined);
+  }
+
+  private async putMeta(loaded: boolean) {
+    const meta: GitCacheMeta = {
+      db: this.cacheKey,
+      ttl: refreshDate(),
+      loaded,
+      checkoutPaths: this.checkoutPaths,
+    };
+    const tx = this.idb.transaction([`igit-meta`], "readwrite");
+    await promisifiedReq(tx.objectStore(`igit-meta`).put(meta, this.cacheKey));
   }
 
   private createFs(wipe: boolean) {
@@ -442,56 +405,30 @@ class GitLoader {
         const db = (event.target as any).result;
         db.createObjectStore(`igit-meta`);
       };
-      const idb = await promisifiedReq<IDBDatabase>(req);
+      this.idb = await promisifiedReq<IDBDatabase>(req);
+      const idb = this.idb;
       let meta: IDBObjectStore;
 
       /// Loads from local cache
-      const tx = idb.transaction([`igit-meta`], "readwrite");
-      meta = tx.objectStore(`igit-meta`);
-      const oldMeta = await promisifiedReq<{
-        db: string;
-        ttl: number;
-        loaded: boolean;
-      }>(meta.get(this.cacheKey));
+      const tx = idb.transaction([`igit-meta`], "readonly");
+      const oldMeta = await promisifiedReq<GitCacheMeta | undefined>(
+        tx.objectStore(`igit-meta`).get(this.cacheKey)
+      );
       /// Cache hit: compile the local copy right away, refresh in background.
       const cached = oldMeta?.loaded === true;
       this.remoteFsLoaded.val = cached;
-      /// Sparse checkout: start from the main file's folder. Caches from
-      /// before sparse checkout (no stored paths) hold the whole tree.
-      const storedPaths = parseStringArray(localStorage.getItem(this.pathsKey));
+      /// Sparse checkout starts from the main file's folder.
       const mainDir = this.storage.spec.slug.split("/").slice(0, -1).join("/");
-      this.checkoutPaths = storedPaths
-        ? storedPaths
-        : cached || !mainDir
-        ? undefined
-        : [mainDir];
-      this.saveCheckoutPaths();
-      await promisifiedReq(
-        meta.put(
-          { db: this.cacheKey, ttl: refreshDate(), loaded: cached },
-          this.cacheKey
-        )
-      );
-      tx.commit();
-
-      const markLoaded = async () => {
-        const tx2 = idb.transaction([`igit-meta`], "readwrite");
-        await promisifiedReq(
-          tx2
-            .objectStore(`igit-meta`)
-            .put(
-              { db: this.cacheKey, ttl: refreshDate(), loaded: true },
-              this.cacheKey
-            )
-        );
-      };
+      this.checkoutPaths =
+        oldMeta?.checkoutPaths ?? (cached || !mainDir ? undefined : [mainDir]);
+      await this.putMeta(cached);
 
       /// Loads from git (in background if cached)
       const headBefore = cached ? await this.headOid() : undefined;
       this.tryLoadFromGit()
         .then(async () => {
           this.error.val = "";
-          await markLoaded();
+          await this.putMeta(true);
           if (!cached) {
             this.remoteFsLoaded.val = true;
             return;
@@ -525,11 +462,7 @@ class GitLoader {
           const cursor: IDBCursorWithValue | null = (event.target as any)
             ?.result;
           if (cursor) {
-            const value: {
-              db: string;
-              ttl: number;
-              loaded: boolean;
-            } = cursor?.value;
+            const value: GitCacheMeta = cursor?.value;
             if (value.ttl < now) {
               // delete entire db
               deleteFuts.push(
@@ -583,14 +516,16 @@ class GitLoader {
   };
 
   /// URLs like `blob/coro/delegation-study/paper.typ` are ambiguous: the ref
-  /// may contain `/`. Pick the longest prefix that is a remote branch/tag
-  /// (memoized, so cached visits stay offline) and rewrite ref/rest/slug.
+  /// may contain `/`. Ask the remote for its refs once (memoized, so cached
+  /// visits stay offline) and rewrite ref/rest/slug accordingly.
   private async resolveRef() {
     const spec = this.storage.spec;
-    const segs = [spec.ref, ...spec.rest];
+    const segments = [spec.ref, ...spec.rest];
     if (spec.rest.length <= 1 || /^[0-9a-f]{40}$/.test(spec.ref)) return;
 
-    const memoKey = `gistd-ref:${this.storage.remoteUrl()}:${segs.join("/")}`;
+    const memoKey = `gistd-ref:${this.storage.remoteUrl()}:${segments.join(
+      "/"
+    )}`;
     let n = Number(localStorage.getItem(memoKey)) || 0;
     if (!n) {
       try {
@@ -599,26 +534,19 @@ class GitLoader {
           url: this.storage.remoteUrl(),
           protocolVersion: 1,
         });
-        const names = new Set(
-          refs.map((r) => r.ref.replace(/^refs\/(heads|tags)\//, ""))
+        n = refSegmentCount(
+          segments,
+          refs.map((r) => r.ref)
         );
-        n = 1;
-        for (let i = segs.length - 1; i > 1; i--) {
-          if (names.has(segs.slice(0, i).join("/"))) {
-            n = i;
-            break;
-          }
-        }
         localStorage.setItem(memoKey, String(n));
       } catch (e) {
         console.warn("failed to resolve ref, assuming single segment", e);
         n = 1;
       }
     }
-    spec.ref = segs.slice(0, n).join("/");
-    spec.rest = segs.slice(n);
+    spec.ref = segments.slice(0, n).join("/");
+    spec.rest = segments.slice(n);
     spec.slug = spec.rest.join("/");
-    console.log("resolved ref:", spec.ref, "file:", spec.slug);
   }
 
   private async loadFromGit() {
@@ -670,40 +598,28 @@ async function loadFromGit(
     ref: spec.ref,
   };
 
-  let cloned = false;
-  try {
-    await fs.promises.readFile("/.git/config");
-  } catch {
+  const hasRepo = await fs.promises.readFile("/.git/config").then(
+    () => true,
+    () => false
+  );
+  if (!hasRepo) {
     await git.clone({ ...g, noCheckout: true });
-    cloned = true;
-  }
-  if (!cloned) {
+  } else {
     const { fetchHead } = await git.fetch(g);
     // `fetch` only moves the remote-tracking ref; fast-forward the local
     // branch so checkout picks up new commits.
-    const localBranch = `refs/heads/${spec.ref}`;
-    const hasLocalBranch = await git
-      .resolveRef({ fs, dir: "/", ref: localBranch })
-      .then(() => true, () => false);
-    if (fetchHead && hasLocalBranch) {
-      await git.writeRef({ fs, dir: "/", ref: localBranch, value: fetchHead, force: true });
+    const ref = `refs/heads/${spec.ref}`;
+    const isBranch = await git.resolveRef({ fs, dir: "/", ref }).then(
+      () => true,
+      () => false
+    );
+    if (fetchHead && isBranch) {
+      await git.writeRef({ fs, dir: "/", ref, value: fetchHead, force: true });
     }
   }
   await git.setConfig({ ...g, path: "user.name", value: "gistd" });
   await git.setConfig({ ...g, path: "user.email", value: "me@gistd.com" });
   await git.checkout({ ...g, force: true, filepaths });
-}
-
-function parseStringArray(json: string | null): string[] | undefined {
-  if (!json) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(json);
-    return Array.isArray(parsed) && parsed.every((p) => typeof p === "string")
-      ? parsed
-      : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 const promisifiedReq = <T>(req: IDBRequest<T>): Promise<T> => {

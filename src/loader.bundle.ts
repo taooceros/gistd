@@ -27,8 +27,16 @@ import compiler015 from "typst-ts-compiler-0.15.0/wasm?url";
 
 const WASM_CACHE = "gistd-wasm";
 const WASM_URLS = [
-  compiler013, renderer013, compiler014, renderer014, compiler0141,
-  renderer0141, compiler0142, renderer0142, compiler015, renderer015,
+  compiler013,
+  renderer013,
+  compiler014,
+  renderer014,
+  compiler0141,
+  renderer0141,
+  compiler0142,
+  renderer0142,
+  compiler015,
+  renderer015,
 ].map((url: string) => new URL(url, location.href).href);
 
 /// Wasm asset names are content-hashed, so a URL's bytes never change: keep
@@ -167,7 +175,9 @@ const getRuntimeConfig = async (runtime: TypstRuntimeId) => {
   const args = argsFromUrl();
   window.$typst$script = new Promise((resolve, reject) => {
     (async () => {
-      const versionConfig: TypstVersionConfig = resolveTypstVersion(args.version);
+      const versionConfig: TypstVersionConfig = resolveTypstVersion(
+        args.version
+      );
       const tsConfig = await getRuntimeConfig(versionConfig.runtime);
       // todo: remove me
       // @ts-ignore

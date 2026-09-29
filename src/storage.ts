@@ -31,7 +31,7 @@ export type StorageSpec =
 
 type CorsOption = string | boolean;
 const DEFAULT_CORS_PROXY =
-  import.meta.env?.VITE_GISTD_CORS_PROXY || "/git-cors-proxy";
+  import.meta.env.VITE_GISTD_CORS_PROXY || "/git-cors-proxy";
 
 export interface GitHubStorageSpec {
   type: "github";
@@ -293,4 +293,24 @@ export function corsUrl(url: string, cors: CorsOption) {
     // See: scripts/test-forgejo.yml
     return `${cors}/${url.replace(/^https?:\/\//, "")}`;
   }
+}
+
+/**
+ * Counts how many leading URL path segments form the git ref, since refs may
+ * contain `/` (`blob/coro/delegation-study/paper.typ`). Picks the longest
+ * prefix naming a branch or tag in `remoteRefs` (full names such as
+ * `refs/heads/main`), leaving at least one segment for the file path.
+ * Defaults to 1.
+ */
+export function refSegmentCount(
+  segments: string[],
+  remoteRefs: string[]
+): number {
+  const names = new Set(
+    remoteRefs.map((ref) => ref.replace(/^refs\/(heads|tags)\//, ""))
+  );
+  for (let n = segments.length - 1; n > 1; n--) {
+    if (names.has(segments.slice(0, n).join("/"))) return n;
+  }
+  return 1;
 }

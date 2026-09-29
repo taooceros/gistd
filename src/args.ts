@@ -48,7 +48,7 @@ export function argsFromUrl(): Args {
   const [pathname, locationSearch, hostname] = newKey;
 
   /// Strips the deploy base (e.g. `/gistd/` on GitHub project pages).
-  const base = import.meta.env?.BASE_URL || "/";
+  const base = import.meta.env.BASE_URL || "/";
   const inputPath = pathname.startsWith(base)
     ? pathname.slice(base.length)
     : pathname.slice(1);
