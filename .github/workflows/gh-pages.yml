@@ -43,6 +43,11 @@ jobs:
       - run: pnpm install
       - run: node scripts/dummy_font_info.ts
       - run: pnpm build
+        env:
+          # Set as repository variables for project pages / external proxies,
+          # e.g. GISTD_BASE=/gistd/, GISTD_CORS_PROXY=https://cors.isomorphic-git.org
+          GISTD_BASE: ${{ vars.GISTD_BASE }}
+          VITE_GISTD_CORS_PROXY: ${{ vars.GISTD_CORS_PROXY }}
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Single page 404
