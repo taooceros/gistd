@@ -117,6 +117,9 @@ export interface FsHooks {
   /// Fetches the latest version of the source (branch head, or the URL) and
   /// recompiles if it changed. Resolves true if anything changed.
   refresh?: () => Promise<boolean>;
+  /// Commit currently checked out and compiled; undefined for plain URLs or
+  /// before the repository has loaded.
+  commit?: () => Promise<string | undefined>;
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array) {
@@ -179,6 +182,7 @@ export const DirectoryView = async ({
         if (!loaded.val) return false;
         return loader.refresh();
       };
+      fsHooks.commit = async () => (loaded.val ? loader.commit() : undefined);
       fsHooks.materializeMissing = async (diagnostics) => {
         if (!loaded.val) return false;
         const paths = missingFilePaths(
@@ -383,6 +387,11 @@ class GitLoader {
       }
     }
     return files;
+  }
+
+  /// HEAD of the working tree, read after pending checkouts finish.
+  commit() {
+    return this.serial(() => this.headOid());
   }
 
   private headOid() {

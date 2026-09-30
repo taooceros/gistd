@@ -37,6 +37,15 @@ export interface Args {
   fontSpecs: FontSpec[];
 }
 
+/// The storage path of the page: `pathname` without the deploy base
+/// (e.g. `/gistd/` on GitHub project pages).
+export function inputPathOf(pathname: string) {
+  const base = import.meta.env.BASE_URL || "/";
+  return pathname.startsWith(base)
+    ? pathname.slice(base.length)
+    : pathname.slice(1);
+}
+
 let _cacheKey: [string, string, string];
 let _cache: Args;
 export function argsFromUrl(): Args {
@@ -52,11 +61,7 @@ export function argsFromUrl(): Args {
   _cacheKey = newKey;
   const [pathname, locationSearch, hostname] = newKey;
 
-  /// Strips the deploy base (e.g. `/gistd/` on GitHub project pages).
-  const base = import.meta.env.BASE_URL || "/";
-  const inputPath = pathname.startsWith(base)
-    ? pathname.slice(base.length)
-    : pathname.slice(1);
+  const inputPath = inputPathOf(pathname);
   const search = new URLSearchParams(locationSearch || "");
   const readme = /(?:-|.)cn/g.test(hostname) ? README_CN : README;
 

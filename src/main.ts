@@ -5,8 +5,10 @@ const { div, button, a } = van.tags;
 
 import { DirectoryView, FsHooks, FsItemState } from "./fs";
 import { TypstDocument, Doc, HtmlDoc } from "./doc";
-import { argsFromUrl } from "./args";
+import { argsFromUrl, inputPathOf } from "./args";
 import type { OutputFormat } from "./args";
+import { pinnedPath } from "./permalink";
+import type { StorageSpec } from "./storage";
 import { getFontProvider } from "./font";
 import { ErrorPanel, DiagnosticMessage } from "./error";
 import { compileTypstDocument } from "./typst-compiler";
@@ -26,20 +28,40 @@ const ExportButton = (title: string, content: string, onclick: () => void) =>
     textContent: content,
   });
 
-const PermalinkButton = () =>
-  button({
-    title: "Copy As PermaLink",
-    textContent: "PermaLink",
+/// Copies a link that keeps showing what is on screen now: the checked-out
+/// commit instead of the branch, and a concrete typst version.
+const PermalinkButton = (spec: StorageSpec, fsHooks: FsHooks) => {
+  const label = van.state("PermaLink");
+  let resetTimer: number | undefined;
+  const flash = (text: string) => {
+    clearTimeout(resetTimer);
+    label.val = text;
+    resetTimer = window.setTimeout(() => (label.val = "PermaLink"), 2500);
+  };
+  return button({
+    title: "Copy a permalink pinned to this commit and typst version",
+    textContent: label,
     onclick: async () => {
-      const args = await argsFromUrl();
-      const search = new URLSearchParams(window.location.search || "");
-      search.set(
+      const url = new URL(window.location.href);
+      const oid = await fsHooks.commit?.();
+      const pinned = oid && pinnedPath(inputPathOf(url.pathname), spec, oid);
+      if (pinned) {
+        url.pathname = (import.meta.env.BASE_URL || "/") + pinned;
+      }
+      url.searchParams.set(
         "g-version",
-        resolveTypstVersion(args.version).concreteVersion
+        resolveTypstVersion(argsFromUrl().version).concreteVersion
       );
-      window.location.search = search.toString();
+      const link = url.toString();
+      try {
+        await navigator.clipboard.writeText(link);
+        flash(pinned || spec.type === "http" ? "Copied" : "Copied (unpinned)");
+      } catch {
+        window.prompt("Copy the permalink:", link);
+      }
     },
   });
+};
 
 /// Fetches the latest version of the branch (or URL) and recompiles.
 const RefreshButton = (fsHooks: FsHooks) => {
@@ -540,7 +562,7 @@ const App = () => {
             ]
           : []),
         RefreshButton(fsHooks),
-        PermalinkButton(),
+        PermalinkButton(storage.spec, fsHooks),
         OutputSwitch(output),
         ...(output === "html" ? [] : [ModeButton(mode)])
       )
