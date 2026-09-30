@@ -114,6 +114,15 @@ export interface FsHooks {
   /// Writes out files that failed to load, if they exist in the repository.
   /// Resolves true if anything new was added (so a recompile may succeed).
   materializeMissing?: (diagnostics: Diagnostic[]) => Promise<boolean>;
+  /// Fetches the latest version of the source (branch head, or the URL) and
+  /// recompiles if it changed. Resolves true if anything changed.
+  refresh?: () => Promise<boolean>;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 // todo: cleanup code
@@ -166,6 +175,10 @@ export const DirectoryView = async ({
         refreshFromRemote
       );
       loader.load();
+      fsHooks.refresh = async () => {
+        if (!loaded.val) return false;
+        return loader.refresh();
+      };
       fsHooks.materializeMissing = async (diagnostics) => {
         if (!loaded.val) return false;
         const paths = missingFilePaths(
@@ -193,6 +206,19 @@ export const DirectoryView = async ({
 
         fsState.val = fsState.val!.add(mainFilePath, data);
       });
+
+      fsHooks.refresh = async () => {
+        if (!loaded.val) return false;
+        const mainFilePath = storage.mainFilePath();
+        // Bypass the HTTP cache: revalidation can miss same-second edits.
+        const res = await fetch(storage.fetchUrl(), { cache: "reload" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = new Uint8Array(await res.arrayBuffer());
+        const prev = fsState.val?.pathSet.get(mainFilePath)?.data.val;
+        if (prev && sameBytes(prev, data)) return false;
+        await refreshFromRemote(new Map([[mainFilePath, data]]));
+        return true;
+      };
 
       break;
     }
@@ -365,6 +391,22 @@ class GitLoader {
       .catch(() => undefined);
   }
 
+  /// Fetches the latest commit of the ref and checks it out; applies changed
+  /// files via `onRemoteUpdated`. Resolves whether HEAD moved.
+  async refresh(): Promise<boolean> {
+    const [before, after] = await this.serial(async () => {
+      const before = await this.headOid();
+      await this.tryLoadFromGitUnlocked();
+      return [before, await this.headOid()];
+    });
+    await this.putMeta(true);
+    console.log("git refresh:", before, "->", after);
+    if (after === before) return false;
+    this.headFiles = undefined;
+    await this.onRemoteUpdated(await this.readAllFiles());
+    return true;
+  }
+
   private async putMeta(loaded: boolean) {
     const meta: GitCacheMeta = {
       db: this.cacheKey,
@@ -424,21 +466,15 @@ class GitLoader {
       await this.putMeta(cached);
 
       /// Loads from git (in background if cached)
-      const headBefore = cached ? await this.headOid() : undefined;
-      this.tryLoadFromGit()
-        .then(async () => {
-          this.error.val = "";
-          await this.putMeta(true);
-          if (!cached) {
+      const sync = cached
+        ? this.refresh()
+        : this.tryLoadFromGit().then(async () => {
+            await this.putMeta(true);
             this.remoteFsLoaded.val = true;
-            return;
-          }
-          const headAfter = await this.headOid();
-          console.log("git refresh:", headBefore, "->", headAfter);
-          if (headAfter !== headBefore) {
-            this.headFiles = undefined;
-            await this.onRemoteUpdated(await this.readAllFiles());
-          }
+          });
+      sync
+        .then(() => {
+          this.error.val = "";
         })
         .catch((e) => {
           console.error(e);

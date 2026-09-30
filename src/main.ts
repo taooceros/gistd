@@ -40,6 +40,33 @@ const PermalinkButton = () =>
       window.location.search = search.toString();
     },
   });
+
+/// Fetches the latest version of the branch (or URL) and recompiles.
+const RefreshButton = (fsHooks: FsHooks) => {
+  const label = van.state("Refresh");
+  const busy = van.state(false);
+  let resetTimer: number | undefined;
+  return button({
+    title: "Fetch the latest version of the branch and recompile",
+    disabled: busy,
+    textContent: label,
+    onclick: async () => {
+      if (!fsHooks.refresh) return;
+      clearTimeout(resetTimer);
+      busy.val = true;
+      label.val = "Refreshing...";
+      try {
+        label.val = (await fsHooks.refresh()) ? "Updated" : "Up to date";
+      } catch (e) {
+        console.error("refresh failed", e);
+        label.val = "Refresh failed";
+      } finally {
+        busy.val = false;
+        resetTimer = window.setTimeout(() => (label.val = "Refresh"), 2500);
+      }
+    },
+  });
+};
 const ModeButton = (mode: "slide" | "doc") =>
   button({
     textContent: mode.charAt(0).toUpperCase() + mode.slice(1),
@@ -512,6 +539,7 @@ const App = () => {
               ),
             ]
           : []),
+        RefreshButton(fsHooks),
         PermalinkButton(),
         OutputSwitch(output),
         ...(output === "html" ? [] : [ModeButton(mode)])
