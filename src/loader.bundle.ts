@@ -1,4 +1,6 @@
 import { argsFromUrl } from "./args";
+import { PackageCache, usePackageCache } from "./package-cache";
+import type { TypstModule } from "./package-cache";
 import type { OutputFormat } from "./args";
 import {
   resolveTypstVersion,
@@ -96,6 +98,7 @@ const getRuntimeConfig = async (
 
       return {
         $typst: (await ts).$typst,
+        typstModule: (await ts) as unknown as TypstModule,
         disableDefaultFontAssets: (await optionInit).disableDefaultFontAssets,
         renderer_build_info: (await rendererWrapper).renderer_build_info,
         compilerWrapper,
@@ -114,6 +117,7 @@ const getRuntimeConfig = async (
 
       return {
         $typst: (await ts).$typst,
+        typstModule: (await ts) as unknown as TypstModule,
         disableDefaultFontAssets: (await optionInit).disableDefaultFontAssets,
         renderer_build_info: (await rendererWrapper).renderer_build_info,
         compilerWrapper,
@@ -132,6 +136,7 @@ const getRuntimeConfig = async (
 
       return {
         $typst: (await ts).$typst,
+        typstModule: (await ts) as unknown as TypstModule,
         disableDefaultFontAssets: (await optionInit).disableDefaultFontAssets,
         renderer_build_info: (await rendererWrapper).renderer_build_info,
         compilerWrapper,
@@ -150,6 +155,7 @@ const getRuntimeConfig = async (
 
       return {
         $typst: (await ts).$typst,
+        typstModule: (await ts) as unknown as TypstModule,
         disableDefaultFontAssets: (await optionInit).disableDefaultFontAssets,
         renderer_build_info: (await rendererWrapper).renderer_build_info,
         compilerWrapper,
@@ -168,6 +174,7 @@ const getRuntimeConfig = async (
 
       return {
         $typst: (await ts).$typst,
+        typstModule: (await ts) as unknown as TypstModule,
         disableDefaultFontAssets: (await optionInit).disableDefaultFontAssets,
         renderer_build_info: (await rendererWrapper).renderer_build_info,
         compilerWrapper,
@@ -185,12 +192,17 @@ const getRuntimeConfig = async (
 
 (() => {
   const args = argsFromUrl();
+  const packages = new PackageCache();
+  const packagesPreloaded = packages
+    .preload()
+    .catch((e) => console.warn("package cache preload failed", e));
   window.$typst$script = new Promise((resolve, reject) => {
     (async () => {
       const versionConfig: TypstVersionConfig = resolveTypstVersion(
         args.version
       );
       const tsConfig = await getRuntimeConfig(versionConfig.runtime, args.output);
+      usePackageCache(tsConfig.typstModule, packages);
       // todo: remove me
       // @ts-ignore
       window.$typst = tsConfig.$typst;
@@ -209,6 +221,8 @@ const getRuntimeConfig = async (
         console.log("renderer:", tsConfig.renderer_build_info());
       });
       gcWasmCache().catch((e) => console.warn("wasm cache gc", e));
+      // Compilation may resolve packages right away; have the cache ready.
+      await packagesPreloaded;
       resolve(undefined);
     })().catch(reject);
   });
