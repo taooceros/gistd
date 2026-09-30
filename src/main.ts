@@ -280,14 +280,17 @@ const App = () => {
   /// Changes Title for Browser History
   document.title = window.location.pathname;
   /// Checks compiler status
+  /// Fonts do not depend on the compiler: start downloading them now so they
+  /// overlap the (much larger) compiler wasm download.
+  const fontInfoPromise = getFontProvider(fontSpecs);
   window.$typst$script
     .then(async () => {
       $typst = window.$typst;
 
       await $typst.getCompiler();
       compilerLoaded.val = true;
+      const fontInfo = await fontInfoPromise;
       if ("setFonts" in $typst) {
-        const fontInfo = await getFontProvider(fontSpecs);
         console.log("fontInfo", fontInfo);
         // todo: remove me
         // @ts-ignore
