@@ -195,9 +195,63 @@ div.error {
   overflow: visible;
 }
 
+.gistd-html-layout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
 .gistd-html-output {
   width: 100%;
   max-width: 960px;
+}
+
+.gistd-html-toc {
+  width: 100%;
+  max-width: 960px;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 0 8px;
+  font-size: 0.9em;
+}
+
+.gistd-html-toc summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.gistd-html-toc ul {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.gistd-html-toc a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.gistd-html-toc a:hover {
+  text-decoration: underline;
+}
+
+/* Wide screens: contents as a sticky sidebar next to the document. */
+@media (min-width: 1200px) {
+  .gistd-html-layout {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .gistd-html-toc {
+    position: sticky;
+    top: 10px;
+    flex: 0 0 220px;
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    margin: 0 16px 0 0;
+  }
 }
 
 

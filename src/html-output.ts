@@ -118,3 +118,29 @@ export function mountHtmlOutput(host: HTMLElement, html: string) {
     });
   }
 }
+
+export interface OutputHeading {
+  /// 1 for the document's top heading level, 2 below it, ...
+  level: number;
+  text: string;
+  element: Element;
+}
+
+/// Headings of the mounted document, with levels relative to the highest
+/// level used (Typst maps `=` headings to `<h2>`).
+export function collectHeadings(host: HTMLElement): OutputHeading[] {
+  const found = [
+    ...(host.shadowRoot?.querySelectorAll(
+      ".gistd-html-body :is(h1, h2, h3, h4, h5, h6)"
+    ) ?? []),
+  ];
+  const levelOf = (el: Element) => Number(el.tagName.slice(1));
+  const top = Math.min(...found.map(levelOf));
+  return found
+    .map((element) => ({
+      level: levelOf(element) - top + 1,
+      text: element.textContent?.trim() || "",
+      element,
+    }))
+    .filter((h) => h.text);
+}

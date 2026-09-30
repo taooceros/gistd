@@ -4,11 +4,12 @@ import type {
   RenderSession,
 } from "typst.ts-0.14/dist/esm/renderer.mjs";
 import { TypstDomDocument } from "./dom";
-import { mountHtmlOutput } from "./html-output";
+import { collectHeadings, mountHtmlOutput } from "./html-output";
+import type { OutputHeading } from "./html-output";
 import { MountDomOptions } from "typst.ts-0.14/dist/esm/options.render.mjs";
 import { RenderInSessionOptions } from "typst.ts-0.14/dist/esm/options.render.mjs";
 
-const { div } = van.tags;
+const { div, details, summary, ul, li, a } = van.tags;
 
 export class TypstDocument {
   doc: TypstDomDocument = undefined!;
@@ -136,13 +137,19 @@ export interface HtmlDocState {
   html: State<string>;
 }
 
-/// Displays Typst HTML output inline in the page (`g-output=html`).
+/// Documents with fewer headings get no table of contents.
+const MIN_TOC_HEADINGS = 3;
+
+/// Displays Typst HTML output inline in the page (`g-output=html`), with a
+/// table of contents built from its headings.
 export const HtmlDoc = ({ compilerLoaded, fontLoaded, html }: HtmlDocState) => {
   const body = div({ class: "gistd-html-output" });
+  const headings = van.state<OutputHeading[]>([]);
 
   van.derive(() => {
     if (html.val) {
       mountHtmlOutput(body, html.val);
+      headings.val = collectHeadings(body);
     }
   });
 
@@ -153,10 +160,41 @@ export const HtmlDoc = ({ compilerLoaded, fontLoaded, html }: HtmlDocState) => {
     return "";
   });
 
+  // Kept across recompiles so its open/closed state survives refreshes.
+  const toc = details(
+    {
+      class: "gistd-html-toc",
+      open: window.matchMedia?.("(min-width: 1200px)").matches ?? false,
+      hidden: () => headings.val.length < MIN_TOC_HEADINGS,
+    },
+    summary("Contents"),
+    () =>
+      ul(
+        headings.val.map((h) =>
+          li(
+            { style: `padding-left: ${(h.level - 1) * 0.9}em` },
+            a(
+              {
+                href: h.element.id ? `#${h.element.id}` : "#",
+                onclick: (event: Event) => {
+                  event.preventDefault();
+                  h.element.scrollIntoView({ block: "start" });
+                  if (h.element.id) {
+                    history.replaceState(history.state, "", `#${h.element.id}`);
+                  }
+                },
+              },
+              h.text
+            )
+          )
+        )
+      )
+  );
+
   return div(
     { id: "gistd-doc" },
     div({ hidden: () => !status.val }, status),
-    body
+    div({ class: "gistd-html-layout" }, toc, body)
   );
 };
 
