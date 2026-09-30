@@ -188,6 +188,9 @@ const App = () => {
     fontLoaded = van.state(false),
     /// Binds to filesystem reload event (bumped on every fs (re)load)
     reloadBell = van.state(0),
+    /// Compiler/runtime load failure; kept apart from `error`, which the
+    /// filesystem and compiler clear on success.
+    loadError = van.state(""),
     /// Sparse checkout hooks, filled in by DirectoryView
     fsHooks: FsHooks = {};
   /// Consecutive recompiles triggered by writing out missing files
@@ -260,20 +263,28 @@ const App = () => {
   /// Changes Title for Browser History
   document.title = window.location.pathname;
   /// Checks compiler status
-  window.$typst$script.then(async () => {
-    $typst = window.$typst;
+  window.$typst$script
+    .then(async () => {
+      $typst = window.$typst;
 
-    await $typst.getCompiler();
-    compilerLoaded.val = true;
-    if ("setFonts" in $typst) {
-      const fontInfo = await getFontProvider(fontSpecs);
-      console.log("fontInfo", fontInfo);
-      // todo: remove me
-      // @ts-ignore
-      await $typst.setFonts(fontInfo);
-    }
-    fontLoaded.val = true;
-  });
+      await $typst.getCompiler();
+      compilerLoaded.val = true;
+      if ("setFonts" in $typst) {
+        const fontInfo = await getFontProvider(fontSpecs);
+        console.log("fontInfo", fontInfo);
+        // todo: remove me
+        // @ts-ignore
+        await $typst.setFonts(fontInfo);
+      }
+      fontLoaded.val = true;
+    })
+    .catch((e) => {
+      // Unsupported g-version / g-output, or the compiler failed to download.
+      console.error(e);
+      loadError.val = `Failed to load the typst compiler: ${
+        e instanceof Error ? e.message : e
+      }`;
+    });
 
   /// Listens to dark mode change
   window
@@ -545,7 +556,7 @@ const App = () => {
       ),
       div(
         { class: "gistd-toolbar-row flex-row" },
-        ErrorPanel({ error }),
+        ErrorPanel({ error: van.derive(() => loadError.val || error.val) }),
         // prev, next
         ...fullScreenButton(mode),
         ...pageControls({ page, maxPage, mode }),
