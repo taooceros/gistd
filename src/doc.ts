@@ -141,10 +141,13 @@ const HTML_FRAME_HEIGHT_MESSAGE = "gistd-html-height";
 /// Injected into the HTML output: reports content height to the parent so the
 /// frame grows with the document, and opens non-fragment links in a new tab
 /// (the sandboxed frame cannot navigate the gistd page itself).
-const HTML_FRAME_HELPER = `<script>(() => {
-  const post = () => parent.postMessage({ type: "${HTML_FRAME_HEIGHT_MESSAGE}", height: document.documentElement.scrollHeight }, "*");
+const HTML_FRAME_HELPER = `<style>html{overflow-y:hidden}</style><script>(() => {
+  // The frame is resized to fit the content, so it never scrolls vertically.
+  // Measure the root box (not scrollHeight, which never shrinks below the
+  // current frame height).
+  const post = () => parent.postMessage({ type: "${HTML_FRAME_HEIGHT_MESSAGE}", height: Math.ceil(document.documentElement.getBoundingClientRect().height) }, "*");
   addEventListener("load", post);
-  new ResizeObserver(post).observe(document.documentElement);
+  addEventListener("DOMContentLoaded", () => new ResizeObserver(post).observe(document.body));
   addEventListener("click", (e) => {
     const a = e.target instanceof Element && e.target.closest("a[href]");
     if (a && !a.getAttribute("href").startsWith("#")) a.target = "_blank";
