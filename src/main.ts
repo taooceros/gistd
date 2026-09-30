@@ -1,7 +1,7 @@
 import "./typst.ts";
 
 import van, { State } from "vanjs-core";
-const { div, button, a } = van.tags;
+const { div, button, a, span } = van.tags;
 
 import { DirectoryView, FsHooks, FsItemState } from "./fs";
 import { TypstDocument, Doc, HtmlDoc } from "./doc";
@@ -101,23 +101,18 @@ const ModeButton = (mode: "slide" | "doc") =>
   });
 
 /// Segmented SVG | HTML switch; the active output is pressed and disabled.
-const OutputSwitch = (output: OutputFormat) => {
+const OutputSwitch = (
+  output: State<OutputFormat>,
+  onSwitch: (target: OutputFormat) => void
+) => {
   const option = (target: OutputFormat, label: string, title: string) =>
     button({
       class: "gistd-output-option",
       title,
       textContent: label,
-      "aria-pressed": String(target === output),
-      disabled: target === output,
-      onclick: () => {
-        const url = new URL(window.location.href);
-        if (target === "html") {
-          url.searchParams.set("g-output", "html");
-        } else {
-          url.searchParams.delete("g-output");
-        }
-        window.location.href = url.toString();
-      },
+      "aria-pressed": () => String(target === output.val),
+      disabled: () => target === output.val,
+      onclick: () => onSwitch(target),
     });
   return div(
     { class: "gistd-output-switch", role: "group", "aria-label": "Output format" },
@@ -200,14 +195,36 @@ const App = () => {
     storage,
     page: initialPage,
     mode: requestedMode,
-    output,
+    output: initialOutput,
     fontSpecs,
   } = argsFromUrl();
   /// HTML output has no pages, so slide mode does not apply
-  const mode = output === "html" ? "doc" : requestedMode;
-  console.log("storage", storage, "page", initialPage, "mode", mode, "output", output);
+  const mode = initialOutput === "html" ? "doc" : requestedMode;
+  /// The displayed output; the SVG/HTML switch changes it in place
+  const output = van.state(initialOutput);
+  console.log("storage", storage, "page", initialPage, "mode", mode, "output", initialOutput);
   document.documentElement.dataset.mode = mode;
-  document.documentElement.dataset.output = output;
+  van.derive(() => (document.documentElement.dataset.output = output.val));
+  let htmlView: HTMLElement | undefined;
+  let pagedView: HTMLElement | undefined;
+
+  /// Switches output without a reload when the page layout stays the same;
+  /// otherwise (slide mode, runtimes without HTML) reloads with the new URL.
+  const switchOutput = (target: OutputFormat) => {
+    const url = new URL(window.location.href);
+    if (target === "html") {
+      url.searchParams.set("g-output", "html");
+    } else {
+      url.searchParams.delete("g-output");
+    }
+    const htmlCapable = window.$typstVersion?.runtime === "0.15.0";
+    if (requestedMode !== "doc" || !htmlCapable) {
+      window.location.href = url.toString();
+      return;
+    }
+    history.replaceState(history.state, "", url);
+    output.val = target;
+  };
 
   /// Styles and outputs
   const /// The source code state
@@ -297,8 +314,8 @@ const App = () => {
       if (
         /// Compiler with fonts should be loaded
         fontLoaded.val &&
-        /// Paged renderer should be ready (HTML output renders into a frame)
-        (output === "html" || typstDoc.val) &&
+        /// Paged renderer should be ready (HTML output renders inline)
+        (output.val === "html" || typstDoc.val) &&
         /// Filesystem should be loaded
         reloadBell.val &&
         /// recompile If focus file changed
@@ -317,7 +334,7 @@ const App = () => {
         const compileResult = await compileTypstDocument($typst, {
           mainFilePath: storage.mainFilePath(),
           queryPdfpc: mode === "slide",
-          output,
+          output: output.val,
         });
         console.log("diagnostics", compileResult.diagnostics);
         if (compileResult.hasError) {
@@ -562,33 +579,35 @@ const App = () => {
         ...pageControls({ page, maxPage, mode }),
 
         ExportButton("Export To PDF", "PDF", exportPdf),
-        ...(output === "html"
-          ? [
-              ExportButton("Export To HTML", "Export HTML", () =>
-                exportAs(htmlOutput.val, "text/html")
-              ),
-            ]
-          : []),
+        button({
+          title: "Export To HTML",
+          textContent: "Export HTML",
+          hidden: () => output.val !== "html",
+          onclick: () => exportAs(htmlOutput.val, "text/html"),
+        }),
         RefreshButton(fsHooks),
         PermalinkButton(storage.spec, fsHooks),
-        OutputSwitch(output),
-        ...(output === "html" ? [] : [ModeButton(mode)])
+        OutputSwitch(output, switchOutput),
+        span({ hidden: () => output.val === "html" }, ModeButton(mode))
       )
     ),
     div(
       { class: "doc-row flex-row" },
-      output === "html"
-        ? HtmlDoc({ compilerLoaded, fontLoaded, html: htmlOutput })
-        : Doc({
-            inFullScreen,
-            maxPage,
-            page,
-            mode,
-            darkMode,
-            compilerLoaded,
-            fontLoaded,
-            typstDoc,
-          })
+      /// Views are created on first use and kept, so switching back does not
+      /// recreate the paged renderer.
+      () =>
+        output.val === "html"
+          ? (htmlView ||= HtmlDoc({ compilerLoaded, fontLoaded, html: htmlOutput }))
+          : (pagedView ||= Doc({
+              inFullScreen,
+              maxPage,
+              page,
+              mode,
+              darkMode,
+              compilerLoaded,
+              fontLoaded,
+              typstDoc,
+            }))
     ),
     div(
       { class: "footer flex-row" },
