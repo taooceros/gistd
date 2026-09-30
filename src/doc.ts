@@ -4,10 +4,11 @@ import type {
   RenderSession,
 } from "typst.ts-0.14/dist/esm/renderer.mjs";
 import { TypstDomDocument } from "./dom";
+import { mountHtmlOutput } from "./html-output";
 import { MountDomOptions } from "typst.ts-0.14/dist/esm/options.render.mjs";
 import { RenderInSessionOptions } from "typst.ts-0.14/dist/esm/options.render.mjs";
 
-const { div, iframe } = van.tags;
+const { div } = van.tags;
 
 export class TypstDocument {
   doc: TypstDomDocument = undefined!;
@@ -135,56 +136,13 @@ export interface HtmlDocState {
   html: State<string>;
 }
 
-/// Message type posted by {@link HTML_FRAME_HELPER} with the content height.
-const HTML_FRAME_HEIGHT_MESSAGE = "gistd-html-height";
-
-/// Injected into the HTML output: reports content height to the parent so the
-/// frame grows with the document, and opens non-fragment links in a new tab
-/// (the sandboxed frame cannot navigate the gistd page itself).
-const HTML_FRAME_HELPER = `<style>html{overflow-y:hidden}</style><script>(() => {
-  // The frame is resized to fit the content, so it never scrolls vertically.
-  // Measure the root box (not scrollHeight, which never shrinks below the
-  // current frame height).
-  const post = () => parent.postMessage({ type: "${HTML_FRAME_HEIGHT_MESSAGE}", height: Math.ceil(document.documentElement.getBoundingClientRect().height) }, "*");
-  addEventListener("load", post);
-  addEventListener("DOMContentLoaded", () => new ResizeObserver(post).observe(document.body));
-  addEventListener("click", (e) => {
-    const a = e.target instanceof Element && e.target.closest("a[href]");
-    if (a && !a.getAttribute("href").startsWith("#")) a.target = "_blank";
-  });
-})();</script>`;
-
-function withFrameHelper(html: string) {
-  const head = /<head[^>]*>/i.exec(html);
-  if (!head) {
-    return HTML_FRAME_HELPER + html;
-  }
-  const at = head.index + head[0].length;
-  return html.slice(0, at) + HTML_FRAME_HELPER + html.slice(at);
-}
-
-/// Displays Typst HTML output in a sandboxed frame (`g-output=html`).
+/// Displays Typst HTML output inline in the page (`g-output=html`).
 export const HtmlDoc = ({ compilerLoaded, fontLoaded, html }: HtmlDocState) => {
-  const frame = iframe({
-    class: "gistd-html-frame",
-    title: "Typst HTML output",
-    // No allow-same-origin: document scripts cannot reach the gistd page.
-    sandbox: "allow-scripts allow-popups allow-popups-to-escape-sandbox",
-  }) as HTMLIFrameElement;
-
-  window.addEventListener("message", (event) => {
-    if (
-      event.source === frame.contentWindow &&
-      event.data?.type === HTML_FRAME_HEIGHT_MESSAGE &&
-      typeof event.data.height === "number"
-    ) {
-      frame.style.height = `${event.data.height}px`;
-    }
-  });
+  const body = div({ class: "gistd-html-output" });
 
   van.derive(() => {
     if (html.val) {
-      frame.srcdoc = withFrameHelper(html.val);
+      mountHtmlOutput(body, html.val);
     }
   });
 
@@ -198,7 +156,7 @@ export const HtmlDoc = ({ compilerLoaded, fontLoaded, html }: HtmlDocState) => {
   return div(
     { id: "gistd-doc" },
     div({ hidden: () => !status.val }, status),
-    frame
+    body
   );
 };
 

@@ -191,18 +191,13 @@ div.error {
   flex-direction: column;
   align-items: center;
   width: 100%;
-  /* The frame is sized to its content; the page scrolls, not a wrapper. */
+  /* The document flows in the page; the page scrolls, not a wrapper. */
   overflow: visible;
 }
 
-.gistd-html-frame {
-  display: block;
+.gistd-html-output {
   width: 100%;
   max-width: 960px;
-  border: none;
-  /* Typst HTML output is unstyled; keep it readable in gistd's dark theme. */
-  background: white;
-  color-scheme: light;
 }
 
 
