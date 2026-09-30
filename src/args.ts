@@ -24,10 +24,15 @@ const DEFAULT_PAGE = "1";
 const DEFAULT_MODE = isDev ? DEFAULT_DEV_MODE : "doc";
 const DEFAULT_VERSION = DEFAULT_TYPST_VERSION;
 
+export type OutputFormat = "paged" | "html";
+
 export interface Args {
   storage: StorageSpecExt;
   page: number;
   mode: "slide" | "doc";
+  /// `paged` renders pages with the SVG/DOM renderer, `html` renders Typst's
+  /// HTML export (`?g-output=html`).
+  output: OutputFormat;
   version: string;
   fontSpecs: FontSpec[];
 }
@@ -61,11 +66,16 @@ export function argsFromUrl(): Args {
   if (mode !== "slide" && mode !== "doc") {
     mode = DEFAULT_MODE;
   }
+  let output = (search.get("g-output") as OutputFormat) || "paged";
+  if (output !== "paged" && output !== "html") {
+    output = "paged";
+  }
   let version = search.get("g-version") || DEFAULT_VERSION;
   const fontSpecs = parseFontSpecsFromSearch(locationSearch || "");
 
   search.delete("g-page");
   search.delete("g-mode");
+  search.delete("g-output");
   search.delete("g-version");
   search.delete("fonts");
   return (_cache = {
@@ -75,6 +85,7 @@ export function argsFromUrl(): Args {
     version,
     page,
     mode,
+    output,
     fontSpecs,
   });
 }

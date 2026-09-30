@@ -7,7 +7,7 @@ import { TypstDomDocument } from "./dom";
 import { MountDomOptions } from "typst.ts-0.14/dist/esm/options.render.mjs";
 import { RenderInSessionOptions } from "typst.ts-0.14/dist/esm/options.render.mjs";
 
-const { div } = van.tags;
+const { div, iframe } = van.tags;
 
 export class TypstDocument {
   doc: TypstDomDocument = undefined!;
@@ -126,6 +126,77 @@ export const Doc = ({
     }
     return dom;
   });
+};
+
+export interface HtmlDocState {
+  compilerLoaded: State<boolean>;
+  fontLoaded: State<boolean>;
+  /// Serialized HTML document produced by the compiler.
+  html: State<string>;
+}
+
+/// Message type posted by {@link HTML_FRAME_HELPER} with the content height.
+const HTML_FRAME_HEIGHT_MESSAGE = "gistd-html-height";
+
+/// Injected into the HTML output: reports content height to the parent so the
+/// frame grows with the document, and opens non-fragment links in a new tab
+/// (the sandboxed frame cannot navigate the gistd page itself).
+const HTML_FRAME_HELPER = `<script>(() => {
+  const post = () => parent.postMessage({ type: "${HTML_FRAME_HEIGHT_MESSAGE}", height: document.documentElement.scrollHeight }, "*");
+  addEventListener("load", post);
+  new ResizeObserver(post).observe(document.documentElement);
+  addEventListener("click", (e) => {
+    const a = e.target instanceof Element && e.target.closest("a[href]");
+    if (a && !a.getAttribute("href").startsWith("#")) a.target = "_blank";
+  });
+})();</script>`;
+
+function withFrameHelper(html: string) {
+  const head = /<head[^>]*>/i.exec(html);
+  if (!head) {
+    return HTML_FRAME_HELPER + html;
+  }
+  const at = head.index + head[0].length;
+  return html.slice(0, at) + HTML_FRAME_HELPER + html.slice(at);
+}
+
+/// Displays Typst HTML output in a sandboxed frame (`g-output=html`).
+export const HtmlDoc = ({ compilerLoaded, fontLoaded, html }: HtmlDocState) => {
+  const frame = iframe({
+    class: "gistd-html-frame",
+    title: "Typst HTML output",
+    // No allow-same-origin: document scripts cannot reach the gistd page.
+    sandbox: "allow-scripts allow-popups allow-popups-to-escape-sandbox",
+  }) as HTMLIFrameElement;
+
+  window.addEventListener("message", (event) => {
+    if (
+      event.source === frame.contentWindow &&
+      event.data?.type === HTML_FRAME_HEIGHT_MESSAGE &&
+      typeof event.data.height === "number"
+    ) {
+      frame.style.height = `${event.data.height}px`;
+    }
+  });
+
+  van.derive(() => {
+    if (html.val) {
+      frame.srcdoc = withFrameHelper(html.val);
+    }
+  });
+
+  const status = van.derive(() => {
+    if (!compilerLoaded.val) return "Loading compiler from CDN...";
+    if (!fontLoaded.val) return "Loading fonts from CDN...";
+    if (!html.val) return "Compiling HTML...";
+    return "";
+  });
+
+  return div(
+    { id: "gistd-doc" },
+    div({ hidden: () => !status.val }, status),
+    frame
+  );
 };
 
 async function renderDom(renderer: TypstRenderer, options: RenderDomOptions) {

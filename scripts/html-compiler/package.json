@@ -1,0 +1,26 @@
+{
+  "name": "gistd-typst-ts-web-compiler-html",
+  "version": "0.8.0-rc1",
+  "description": "typst.ts v0.8.0-rc1 web compiler with TypstCompileWorld.html() (html-export.patch). Built and released by scripts/html-compiler/build.sh.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "module": "./pkg/wasm-pack-shim.mjs",
+  "types": "./pkg/typst_ts_web_compiler.d.ts",
+  "exports": {
+    ".": {
+      "types": "./pkg/typst_ts_web_compiler.d.ts",
+      "default": "./pkg/wasm-pack-shim.mjs"
+    },
+    "./wasm": {
+      "types": "./pkg/typst_ts_web_compiler_bg.wasm.d.ts",
+      "default": "./pkg/typst_ts_web_compiler_bg.wasm"
+    }
+  },
+  "files": [
+    "pkg/wasm-pack-shim.mjs",
+    "pkg/typst_ts_web_compiler_bg.wasm",
+    "pkg/typst_ts_web_compiler_bg.wasm.d.ts",
+    "pkg/typst_ts_web_compiler.mjs",
+    "pkg/typst_ts_web_compiler.d.ts"
+  ]
+}

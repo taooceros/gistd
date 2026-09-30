@@ -1,4 +1,5 @@
 import { argsFromUrl } from "./args";
+import type { OutputFormat } from "./args";
 import {
   resolveTypstVersion,
   TypstRuntimeId,
@@ -24,6 +25,9 @@ import compiler0142 from "typst-ts-compiler-0.14.2/wasm?url";
 import renderer015 from "typst-ts-renderer-0.15.0/wasm?url";
 // @ts-ignore
 import compiler015 from "typst-ts-compiler-0.15.0/wasm?url";
+// HTML-capable build of the 0.15.0 web compiler (see vendor/typst-ts-web-compiler-html).
+// @ts-ignore
+import compiler015Html from "typst-ts-compiler-0.15.0-html/wasm?url";
 
 const WASM_CACHE = "gistd-wasm";
 const WASM_URLS = [
@@ -36,6 +40,7 @@ const WASM_URLS = [
   compiler0142,
   renderer0142,
   compiler015,
+  compiler015Html,
   renderer015,
 ].map((url: string) => new URL(url, location.href).href);
 
@@ -72,7 +77,15 @@ async function gcWasmCache() {
   }
 }
 
-const getRuntimeConfig = async (runtime: TypstRuntimeId) => {
+const getRuntimeConfig = async (
+  runtime: TypstRuntimeId,
+  output: OutputFormat
+) => {
+  if (output === "html" && runtime !== "0.15.0") {
+    throw new Error(
+      `g-output=html requires typst v0.15.0 or latest, got runtime ${runtime}`
+    );
+  }
   switch (runtime) {
     case "0.13": {
       const ts = import("typst.ts-0.13");
@@ -149,9 +162,12 @@ const getRuntimeConfig = async (runtime: TypstRuntimeId) => {
     case "0.15.0": {
       const ts = import("typst.ts-0.15.0");
       const optionInit = import("typst.ts-0.15.0/options.init");
-      const compilerWrapper = import("typst-ts-compiler-0.15.0");
+      const html = output === "html";
+      const compilerWrapper = html
+        ? import("typst-ts-compiler-0.15.0-html")
+        : import("typst-ts-compiler-0.15.0");
       const rendererWrapper = import("typst-ts-renderer-0.15.0");
-      const compilerModule = fetchImmutable(compiler015);
+      const compilerModule = fetchImmutable(html ? compiler015Html : compiler015);
       const rendererModule = fetchImmutable(renderer015);
 
       return {
@@ -178,7 +194,7 @@ const getRuntimeConfig = async (runtime: TypstRuntimeId) => {
       const versionConfig: TypstVersionConfig = resolveTypstVersion(
         args.version
       );
-      const tsConfig = await getRuntimeConfig(versionConfig.runtime);
+      const tsConfig = await getRuntimeConfig(versionConfig.runtime, args.output);
       // todo: remove me
       // @ts-ignore
       window.$typst = tsConfig.$typst;

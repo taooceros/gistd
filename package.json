@@ -39,6 +39,7 @@
     "typst.ts-0.15.0": "npm:@myriaddreamin/typst.ts@0.8.0-rc1",
     "typst-ts-renderer-0.15.0": "npm:@myriaddreamin/typst-ts-renderer@0.8.0-rc1",
     "typst-ts-compiler-0.15.0": "npm:@myriaddreamin/typst-ts-web-compiler@0.8.0-rc1",
+    "typst-ts-compiler-0.15.0-html": "https://github.com/taooceros/gistd/releases/download/html-compiler-0.8.0-rc1/gistd-typst-ts-web-compiler-html-0.8.0-rc1.tgz",
     "isomorphic-git": "^1.33.1",
     "vanjs-core": "^1.5.5"
   }

@@ -90,6 +90,26 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
+.gistd-output-switch {
+  display: inline-flex;
+}
+
+.gistd-output-switch .gistd-output-option:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.gistd-output-switch .gistd-output-option:last-child {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.gistd-output-option[aria-pressed="true"] {
+  border-color: #646cff;
+  color: #646cff;
+  cursor: default;
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;
@@ -165,6 +185,22 @@ div.error {
 .footer {
   justify-content: center;
   margin-bottom: 10px;
+}
+
+:root[data-output="html"] #gistd-doc {
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.gistd-html-frame {
+  width: 100%;
+  max-width: 960px;
+  min-height: 50vh;
+  border: none;
+  /* Typst HTML output is unstyled; keep it readable in gistd's dark theme. */
+  background: white;
+  color-scheme: light;
 }
 
 

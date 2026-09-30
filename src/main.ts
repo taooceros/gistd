@@ -4,8 +4,9 @@ import van, { State } from "vanjs-core";
 const { div, button, a } = van.tags;
 
 import { DirectoryView, FsHooks, FsItemState } from "./fs";
-import { TypstDocument, Doc } from "./doc";
+import { TypstDocument, Doc, HtmlDoc } from "./doc";
 import { argsFromUrl } from "./args";
+import type { OutputFormat } from "./args";
 import { getFontProvider } from "./font";
 import { ErrorPanel, DiagnosticMessage } from "./error";
 import { compileTypstDocument } from "./typst-compiler";
@@ -49,6 +50,32 @@ const ModeButton = (mode: "slide" | "doc") =>
       window.location.href = url.toString();
     },
   });
+
+/// Segmented SVG | HTML switch; the active output is pressed and disabled.
+const OutputSwitch = (output: OutputFormat) => {
+  const option = (target: OutputFormat, label: string, title: string) =>
+    button({
+      class: "gistd-output-option",
+      title,
+      textContent: label,
+      "aria-pressed": String(target === output),
+      disabled: target === output,
+      onclick: () => {
+        const url = new URL(window.location.href);
+        if (target === "html") {
+          url.searchParams.set("g-output", "html");
+        } else {
+          url.searchParams.delete("g-output");
+        }
+        window.location.href = url.toString();
+      },
+    });
+  return div(
+    { class: "gistd-output-switch", role: "group", "aria-label": "Output format" },
+    option("paged", "SVG", "Render pages as SVG"),
+    option("html", "HTML", "Render Typst HTML output (typst v0.15.0+)")
+  );
+};
 
 const fullScreenButton = (mode: "slide" | "doc") => {
   if (mode === "slide") {
@@ -120,15 +147,15 @@ const App = () => {
     /// Creates storage spec from url
     storage,
     page: initialPage,
-    mode,
+    mode: requestedMode,
+    output,
     fontSpecs,
   } = argsFromUrl();
-  console.log("storage", storage, "page", initialPage, "mode", mode);
-  if (mode === "slide") {
-    document.documentElement.dataset.mode = "slide";
-  } else {
-    document.documentElement.dataset.mode = "doc";
-  }
+  /// HTML output has no pages, so slide mode does not apply
+  const mode = output === "html" ? "doc" : requestedMode;
+  console.log("storage", storage, "page", initialPage, "mode", mode, "output", output);
+  document.documentElement.dataset.mode = mode;
+  document.documentElement.dataset.output = output;
 
   /// Styles and outputs
   const /// The source code state
@@ -137,6 +164,8 @@ const App = () => {
     darkMode = van.state(isDarkMode()),
     /// The typst document
     typstDoc = van.state<TypstDocument | undefined>(undefined),
+    /// The serialized HTML document (g-output=html)
+    htmlOutput = van.state(""),
     /// request to change focus file
     changeFocusFile = van.state<FsItemState | undefined>(undefined),
     /// The current focus file
@@ -208,8 +237,8 @@ const App = () => {
       if (
         /// Compiler with fonts should be loaded
         fontLoaded.val &&
-        /// Typst document should be loaded
-        typstDoc.val &&
+        /// Paged renderer should be ready (HTML output renders into a frame)
+        (output === "html" || typstDoc.val) &&
         /// Filesystem should be loaded
         reloadBell.val &&
         /// recompile If focus file changed
@@ -228,6 +257,7 @@ const App = () => {
         const compileResult = await compileTypstDocument($typst, {
           mainFilePath: storage.mainFilePath(),
           queryPdfpc: mode === "slide",
+          output,
         });
         console.log("diagnostics", compileResult.diagnostics);
         if (compileResult.hasError) {
@@ -251,6 +281,9 @@ const App = () => {
             compileResult.changeKind,
             compileResult.vector,
           ]);
+        }
+        if (compileResult.html !== undefined) {
+          htmlOutput.val = compileResult.html;
         }
         error.val = "";
 
@@ -472,24 +505,32 @@ const App = () => {
           alert("Not implemented")
         ),
         ExportButton("Export To PDF", "PDF", exportPdf),
+        ...(output === "html"
+          ? [
+              ExportButton("Export To HTML", "Export HTML", () =>
+                exportAs(htmlOutput.val, "text/html")
+              ),
+            ]
+          : []),
         PermalinkButton(),
-        ModeButton(mode)
-        // div({ style: "width: 5px" }),
-        // ExportButton("HTML", exportHtml)
+        OutputSwitch(output),
+        ...(output === "html" ? [] : [ModeButton(mode)])
       )
     ),
     div(
       { class: "doc-row flex-row" },
-      Doc({
-        inFullScreen,
-        maxPage,
-        page,
-        mode,
-        darkMode,
-        compilerLoaded,
-        fontLoaded,
-        typstDoc,
-      })
+      output === "html"
+        ? HtmlDoc({ compilerLoaded, fontLoaded, html: htmlOutput })
+        : Doc({
+            inFullScreen,
+            maxPage,
+            page,
+            mode,
+            darkMode,
+            compilerLoaded,
+            fontLoaded,
+            typstDoc,
+          })
     ),
     div(
       { class: "footer flex-row" },

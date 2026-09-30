@@ -29,6 +29,9 @@ importers:
       typst-ts-compiler-0.15.0:
         specifier: npm:@myriaddreamin/typst-ts-web-compiler@0.8.0-rc1
         version: '@myriaddreamin/typst-ts-web-compiler@0.8.0-rc1'
+      typst-ts-compiler-0.15.0-html:
+        specifier: https://github.com/taooceros/gistd/releases/download/html-compiler-0.8.0-rc1/gistd-typst-ts-web-compiler-html-0.8.0-rc1.tgz
+        version: gistd-typst-ts-web-compiler-html@https://github.com/taooceros/gistd/releases/download/html-compiler-0.8.0-rc1/gistd-typst-ts-web-compiler-html-0.8.0-rc1.tgz
       typst-ts-renderer-0.13:
         specifier: npm:@myriaddreamin/typst-ts-renderer@0.6.1-rc5
         version: '@myriaddreamin/typst-ts-renderer@0.6.1-rc5'
@@ -639,6 +642,10 @@ packages:
   get-proto@1.0.1:
     resolution: {integrity: sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==}
     engines: {node: '>= 0.4'}
+
+  gistd-typst-ts-web-compiler-html@https://github.com/taooceros/gistd/releases/download/html-compiler-0.8.0-rc1/gistd-typst-ts-web-compiler-html-0.8.0-rc1.tgz:
+    resolution: {integrity: sha512-N7abA2OV7QcBqVwAS/+irdET/lec9eJL2S/L53g3bO5eGoUNw1Wje0sSx9BO6m5Fn1qslygbOPe5mpA4QoMSkw==, tarball: https://github.com/taooceros/gistd/releases/download/html-compiler-0.8.0-rc1/gistd-typst-ts-web-compiler-html-0.8.0-rc1.tgz}
+    version: 0.8.0-rc1
 
   glob-parent@5.1.2:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==}
@@ -1421,6 +1428,8 @@ snapshots:
     dependencies:
       dunder-proto: 1.0.1
       es-object-atoms: 1.1.1
+
+  gistd-typst-ts-web-compiler-html@https://github.com/taooceros/gistd/releases/download/html-compiler-0.8.0-rc1/gistd-typst-ts-web-compiler-html-0.8.0-rc1.tgz: {}
 
   glob-parent@5.1.2:
     dependencies:

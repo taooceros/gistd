@@ -1,0 +1,66 @@
+diff --git a/packages/compiler/Cargo.toml b/packages/compiler/Cargo.toml
+index d26e794149..e1764f749d 100644
+--- a/packages/compiler/Cargo.toml
++++ b/packages/compiler/Cargo.toml
+@@ -59,6 +59,7 @@
+ fonts = ["reflexo-typst/fonts", "typst-assets/fonts"]
+ incr = []
+ pdf = ["reflexo-typst/pdf"]
++html = ["reflexo-typst/html"]
+ svg = ["reflexo-typst/svg"]
+ ast = ["reflexo-typst/ast"]
+ semantic_tokens = []
+diff --git a/packages/compiler/src/lib.rs b/packages/compiler/src/lib.rs
+index a672ab17bb..e82c154587 100644
+--- a/packages/compiler/src/lib.rs
++++ b/packages/compiler/src/lib.rs
+@@ -441,6 +441,49 @@
+         })
+     }
+ 
++    /// Compiles the document for HTML target and serializes it to a static
++    /// HTML string.
++    ///
++    /// Returns `{ result: string, title?: string }` (or diagnostics on error)
++    /// when `diagnostics_format != 0`, otherwise the HTML string.
++    #[cfg(feature = "html")]
++    pub fn html(&mut self, diagnostics_format: u8) -> Result<JsValue, JsValue> {
++        let Some(doc) = self.do_compile_html()? else {
++            return self.get_diag::<TypstHtmlDocument>(diagnostics_format);
++        };
++
++        let serialized = reflexo_typst::static_html(&doc).and_then(|output| {
++            let html = output.html()?.to_owned();
++            Ok((html, output.title().map(|t| t.to_string())))
++        });
++        let (html, title) = match serialized {
++            Ok(v) => v,
++            Err(errors) if diagnostics_format >= 2 => {
++                return Ok(convert_diag(
++                    errors.iter(),
++                    Some(&self.graph.snap.world),
++                    true,
++                    diagnostics_format,
++                ));
++            }
++            Err(errors) => {
++                let errors = errors.iter().collect::<Vec<_>>();
++                return Err(format!("{errors:?}").into());
++            }
++        };
++
++        Ok(if diagnostics_format != 0 {
++            let result = js_sys::Object::new();
++            js_sys::Reflect::set(&result, &"result".into(), &html.into())?;
++            if let Some(title) = title {
++                js_sys::Reflect::set(&result, &"title".into(), &title.into())?;
++            }
++            result.into()
++        } else {
++            html.into()
++        })
++    }
++
+     pub fn query(
+         &mut self,
+         kind: u8,
