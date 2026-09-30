@@ -561,9 +561,6 @@ const App = () => {
         ...fullScreenButton(mode),
         ...pageControls({ page, maxPage, mode }),
 
-        ExportButton("Compilation Settings", "Settings", () =>
-          alert("Not implemented")
-        ),
         ExportButton("Export To PDF", "PDF", exportPdf),
         ...(output === "html"
           ? [
