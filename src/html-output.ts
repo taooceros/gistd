@@ -44,20 +44,34 @@ function sanitize(root: ParentNode) {
   }
 }
 
-/// Resets inherited gistd styles so the document looks as it would standalone.
+/// Resets inherited gistd styles so the document looks as it would standalone,
+/// following the system colour scheme like the rest of gistd. Documents can
+/// still override all of this with their own CSS.
 const HOST_STYLE = `:host {
   all: initial;
   display: block;
   background: white;
   color: black;
   color-scheme: light;
-  /* Browser default is serif; documents can still override via their CSS. */
+  /* Browser default is serif. */
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   line-height: 1.5;
 }
 .gistd-html-body {
   display: block;
   margin: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :host {
+    background: #242424;
+    color: rgba(255, 255, 255, 0.87);
+    color-scheme: dark;
+  }
+  a:link { color: #8ab4f8; }
+  a:visited { color: #c58af9; }
+  /* html.frame output is SVG with hard-coded (usually black) colours: keep
+     them exact on a light backdrop rather than inverting. */
+  svg { background: white; border-radius: 2px; }
 }`;
 
 export function mountHtmlOutput(host: HTMLElement, html: string) {
