@@ -51,6 +51,9 @@ const HOST_STYLE = `:host {
   background: white;
   color: black;
   color-scheme: light;
+  /* Browser default is serif; documents can still override via their CSS. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  line-height: 1.5;
 }
 .gistd-html-body {
   display: block;
