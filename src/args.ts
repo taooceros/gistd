@@ -55,7 +55,7 @@ export function argsFromUrl(): Args {
     window.location.hostname,
   ];
 
-  if (_cache && newKey === _cacheKey) {
+  if (_cache && newKey.every((part, i) => part === _cacheKey[i])) {
     return _cache;
   }
   _cacheKey = newKey;
