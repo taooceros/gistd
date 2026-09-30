@@ -65,6 +65,7 @@ These URL parameters can change the behavior of gistd.
 - `g-output`: The output format to display.
   - `paged` (default): Render the pages of the document.
   - `html`: Render Typst's HTML export (experimental; requires `g-version` `v0.15.0` or `latest`). The `SVG` / `HTML` switch in the toolbar toggles it.
+- `g-refresh`: Check the branch (or URL) for changes every N seconds and recompile when it changed, e.g. `?g-refresh=30`. The minimum is 10 seconds; checks pause while the tab is hidden.
 - `g-version`: The typst compiler version to use.
   - Could be `v0.13.0`, `v0.13.1`, `v0.14.0`, or `latest`.
 - `fonts`: Extra font providers to register. This parameter can appear multiple times, and each value must include its provider as `provider:value`.

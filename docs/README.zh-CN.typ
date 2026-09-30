@@ -65,6 +65,7 @@ https://gistd-cn.myriad-dreamin.com/typst/templates/blob/main/charged-ieee/templ
 - `g-output`: 输出格式。
   - `paged`（默认）：按页面渲染文档。
   - `html`: 渲染 Typst 的 HTML 导出（实验性；需要 `g-version` 为 `v0.15.0` 或 `latest`）。也可以通过工具栏的 `SVG` / `HTML` 切换按钮切换。
+- `g-refresh`: 每 N 秒检查一次分支（或 URL）是否有更新，有变化时重新编译，例如 `?g-refresh=30`。最小间隔为 10 秒；标签页不可见时暂停检查。
 - `g-version`: 所使用的 Typst 编译器版本。
   - 合法值为：`v0.13.0`, `v0.13.1`, `v0.14.0`或`latest`。
 - `fonts`: 额外注册的字体 provider。这个参数可以重复出现，每一个值都必须包含 provider，格式是 `provider:value`。

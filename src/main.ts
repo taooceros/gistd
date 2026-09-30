@@ -47,6 +47,8 @@ const PermalinkButton = (spec: StorageSpec, fsHooks: FsHooks) => {
       const pinned = oid && pinnedPath(inputPathOf(url.pathname), spec, oid);
       if (pinned) {
         url.pathname = (import.meta.env.BASE_URL || "/") + pinned;
+        // A pinned commit never changes.
+        url.searchParams.delete("g-refresh");
       }
       url.searchParams.set(
         "g-version",
@@ -63,30 +65,49 @@ const PermalinkButton = (spec: StorageSpec, fsHooks: FsHooks) => {
   });
 };
 
-/// Fetches the latest version of the branch (or URL) and recompiles.
-const RefreshButton = (fsHooks: FsHooks) => {
-  const label = van.state("Refresh");
+/// Fetches the latest version of the branch (or URL) and recompiles; with an
+/// interval (`g-refresh`), also polls while the tab is visible.
+const RefreshButton = (fsHooks: FsHooks, interval?: number) => {
+  const idle = interval ? `Refresh · ${interval}s` : "Refresh";
+  const label = van.state(idle);
   const busy = van.state(false);
   let resetTimer: number | undefined;
+  const flash = (text: string) => {
+    clearTimeout(resetTimer);
+    label.val = text;
+    resetTimer = window.setTimeout(() => (label.val = idle), 2500);
+  };
+  /// Background polls stay silent unless something changed or failed.
+  const run = async (manual: boolean) => {
+    if (!fsHooks.refresh || busy.val) return;
+    busy.val = true;
+    if (manual) {
+      clearTimeout(resetTimer);
+      label.val = "Refreshing...";
+    }
+    try {
+      const updated = await fsHooks.refresh();
+      if (updated) flash("Updated");
+      else if (manual) flash("Up to date");
+    } catch (e) {
+      console.error("refresh failed", e);
+      flash("Refresh failed");
+    } finally {
+      busy.val = false;
+    }
+  };
+  if (interval) {
+    window.setInterval(() => {
+      if (document.visibilityState === "visible") void run(false);
+    }, interval * 1000);
+  }
   return button({
-    title: "Fetch the latest version of the branch and recompile",
+    title: interval
+      ? `Fetch the latest version of the branch and recompile (automatically every ${interval}s)`
+      : "Fetch the latest version of the branch and recompile",
     disabled: busy,
     textContent: label,
-    onclick: async () => {
-      if (!fsHooks.refresh) return;
-      clearTimeout(resetTimer);
-      busy.val = true;
-      label.val = "Refreshing...";
-      try {
-        label.val = (await fsHooks.refresh()) ? "Updated" : "Up to date";
-      } catch (e) {
-        console.error("refresh failed", e);
-        label.val = "Refresh failed";
-      } finally {
-        busy.val = false;
-        resetTimer = window.setTimeout(() => (label.val = "Refresh"), 2500);
-      }
-    },
+    onclick: () => run(true),
   });
 };
 const ModeButton = (mode: "slide" | "doc") =>
@@ -197,6 +218,7 @@ const App = () => {
     mode: requestedMode,
     output: initialOutput,
     fontSpecs,
+    refreshInterval,
   } = argsFromUrl();
   /// HTML output has no pages, so slide mode does not apply
   const mode = initialOutput === "html" ? "doc" : requestedMode;
@@ -588,7 +610,7 @@ const App = () => {
           hidden: () => output.val !== "html",
           onclick: () => exportAs(htmlOutput.val, "text/html"),
         }),
-        RefreshButton(fsHooks),
+        RefreshButton(fsHooks, refreshInterval),
         PermalinkButton(storage.spec, fsHooks),
         OutputSwitch(output, switchOutput),
         span({ hidden: () => output.val === "html" }, ModeButton(mode))

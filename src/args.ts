@@ -35,6 +35,24 @@ export interface Args {
   output: OutputFormat;
   version: string;
   fontSpecs: FontSpec[];
+  /// Seconds between automatic refreshes (`?g-refresh=<seconds>`), or
+  /// undefined when auto-refresh is off.
+  refreshInterval?: number;
+}
+
+/// Shortest accepted auto-refresh interval, to keep load on the CORS proxy
+/// and git hosts reasonable.
+export const MIN_REFRESH_INTERVAL = 10;
+
+/// Parses `g-refresh`: a number of seconds, clamped to
+/// {@link MIN_REFRESH_INTERVAL}; empty means the minimum. Anything else (or
+/// `0`/`false`) disables auto-refresh.
+export function parseRefreshInterval(value: string | null) {
+  if (value === null) return undefined;
+  if (value === "" || value === "true") return MIN_REFRESH_INTERVAL;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return Math.max(MIN_REFRESH_INTERVAL, seconds);
 }
 
 /// The storage path of the page: `pathname` without the deploy base
@@ -77,11 +95,13 @@ export function argsFromUrl(): Args {
   }
   let version = search.get("g-version") || DEFAULT_VERSION;
   const fontSpecs = parseFontSpecsFromSearch(locationSearch || "");
+  const refreshInterval = parseRefreshInterval(search.get("g-refresh"));
 
   search.delete("g-page");
   search.delete("g-mode");
   search.delete("g-output");
   search.delete("g-version");
+  search.delete("g-refresh");
   search.delete("fonts");
   return (_cache = {
     storage: createStorageSpecExt(
@@ -92,5 +112,6 @@ export function argsFromUrl(): Args {
     mode,
     output,
     fontSpecs,
+    refreshInterval,
   });
 }
