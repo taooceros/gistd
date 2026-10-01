@@ -445,6 +445,7 @@ class GitLoader {
 
     try {
       await this.resolveRef();
+      await this.expandShortSha();
       this.cacheKey = `gistd-git-${this.storage.remoteUrl()}$$[${
         this.storage.spec.ref
       }]`;
@@ -592,6 +593,51 @@ class GitLoader {
     spec.ref = segments.slice(0, n).join("/");
     spec.rest = segments.slice(n);
     spec.slug = spec.rest.join("/");
+  }
+
+  /// `blob/abc1234/main.typ`: git servers only accept full object ids, so
+  /// expand abbreviated SHAs via the GitHub REST API (CORS-enabled). Branches
+  /// and tags win over SHAs; results are memoized since commits are immutable.
+  private async expandShortSha() {
+    const storage = this.storage;
+    const spec = storage.spec;
+    if (
+      storage.type !== "github" ||
+      storage.spec.domain !== "github.com" ||
+      !/^[0-9a-f]{4,39}$/i.test(spec.ref)
+    )
+      return;
+
+    const memoKey = `gistd-sha:${storage.remoteUrl()}:${spec.ref}`;
+    let full = localStorage.getItem(memoKey);
+    if (full === null) {
+      const refs = await git.listServerRefs({
+        http: { request: this.corsRequest },
+        url: storage.remoteUrl(),
+        protocolVersion: 1,
+      });
+      const named = refs.some(
+        (r) =>
+          r.ref === `refs/heads/${spec.ref}` || r.ref === `refs/tags/${spec.ref}`
+      );
+      if (named) {
+        full = "";
+      } else {
+        const res = await fetch(
+          `https://api.github.com/repos/${storage.spec.user}/${storage.spec.repo}/commits/${spec.ref}`,
+          { headers: { Accept: "application/vnd.github.sha" } }
+        );
+        if (res.status === 422)
+          throw new Error(`ambiguous or unknown short SHA: ${spec.ref}`);
+        if (!res.ok)
+          throw new Error(`GitHub API ${res.status} resolving ${spec.ref}`);
+        full = (await res.text()).trim();
+        if (!/^[0-9a-f]{40}$/.test(full))
+          throw new Error(`unexpected GitHub API response for ${spec.ref}`);
+      }
+      localStorage.setItem(memoKey, full);
+    }
+    if (full) spec.ref = full;
   }
 
   private async loadFromGit() {
